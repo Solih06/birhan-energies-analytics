@@ -1,0 +1,18 @@
+# Python bytecode environment
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Data files (keep raw CSV files local)
+data/raw/*
+!data/raw/.gitkeep
+
+# IDEs settings
+.idea/
+.DS_Store
