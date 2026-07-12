@@ -97,15 +97,30 @@ Continuous integration testing is configured via GitHub Actions. You can execute
 ```bash
 python -m pytest tests/
 ```
-## Strategic Summary Matrix of Explored Shock Events
-The model evaluates mathematically isolated structural changes against these historical global market shocks:
 
-Gulf War Outbreak (1990): Drastic immediate energy supply shocks.
+---
 
-Global Financial Crisis Peak (2008): Massive demand destruction and asset bubble pops.
+## 📈 Analysis Workflow & Strategic Event Dataset
 
-OPEC Supply Ceiling Shifts (2014): Market oversupply regime transformation.
+To isolate structural anomalies, the analysis pipeline feeds a curated timeline of major global events into the statistical models as a benchmarking layer. This event dataset serves as a foundational input for downstream pipelines:
 
-COVID-19 Pandemic Declaration (2020): Unprecedented historical energy demand contraction.
+1. **Pipeline Input:** The 11 events in this dataset map directly to the continuous log return arrays generated in `src/data_pipeline.py` to check for 3-sigma tail-risk outliers.
+2. **Model Validation:** The identified change points ($\tau$) from `src/bayesian_model.py` are cross-referenced with these dates to evaluate how quickly prices react to real-world shocks.
+3. **API Delivery:** Endpoints in `src/app.py` stream this matrix alongside live pricing information to let frontend dashboards construct interactive event timelines.
 
-Russia-Ukraine War Outbreak (2022): Sweeping energy trade reorganizations and structural price spikes.
+### Complete Reference Event Matrix:
+| Event Date | Market Shock Event | Core Category | Macroeconomic / Structural Vector Impact |
+| :--- | :--- | :--- | :--- |
+| **1990-08-02** | Gulf War Outbreak | Geopolitical | Immediate crude supply disruptions and soaring volatility premiums. |
+| **1997-11-27** | OPEC Jakarta Expansion | OPEC Policy | Quota hikes during the Asian Financial Crisis trigger demand destruction. |
+| **2001-09-11** | September 11 Attacks | Geopolitical | Global aviation contractions prompt steep drops in jet fuel demand. |
+| **2003-03-20** | Iraq War Invasion | Geopolitical | Long-term risk premiums introduced via Middle Eastern logistical bottlenecks. |
+| **2008-07-11** | Global Financial Crisis Peak| Macroeconomic | Prices peak at $147/bbl before a major asset-bubble contraction. |
+| **2011-02-15** | Arab Spring Outbreak | Geopolitical | Civil unrest halts Libyan sweet crude output, spiking spot premiums. |
+| **2014-11-27** | OPEC Market Share War | OPEC Policy | Shift to high-volume output creates a multi-year supply glut. |
+| **2018-11-04** | US Iran Sanctions | Geopolitical | Re-imposition of secondary sanctions curtails international export volumes. |
+| **2020-03-06** | OPEC+ Alliance Breakdown | OPEC Policy | Brief price war between top producers floods the physical market. |
+| **2020-03-11** | COVID-19 Pandemic | Macroeconomic | Global lock-downs cause an unprecedented transport fuel demand shock. |
+| **2022-02-24** | Russia-Ukraine War | Geopolitical | Major trade re-routing and widespread structural risk premiums. |
+
+For detailed information regarding statistical validations, please refer to the complete [Assumptions and Limitations Framework](docs/assumptions_limitations.md).

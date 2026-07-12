@@ -29,17 +29,20 @@ def initialize_backend_data():
     except Exception as e:
         logging.error(f"Failed to preload data during API startup: {str(e)}")
 
-# Predefined timeline of major historical geopolitical and OPEC economic shock matrix
+# Expanded matrix featuring 11 historical shocks affecting Brent Crude Oil pricing structures
 HISTORICAL_SHOCKS = [
-    {"date": "1990-08-02", "event": "Gulf War Outbreak", "category": "Geopolitical Conflict"},
-    {"date": "2001-09-11", "event": "September 11 Attacks", "category": "Geopolitical Shock"},
-    {"date": "2008-07-11", "event": "Global Financial Crisis Peak", "category": "Macroeconomic Crisis"},
-    {"date": "2014-11-27", "event": "OPEC Production Ceiling Shift", "category": "OPEC Policy"},
-    {"date": "2020-03-06", "event": "OPEC+ Alliance Breakdown", "category": "OPEC Policy"},
-    {"date": "2020-03-11", "event": "COVID-19 Pandemic Declaration", "category": "Macroeconomic Shock"},
-    {"date": "2022-02-24", "event": "Russia-Ukraine War Outbreak", "category": "Geopolitical Conflict"}
+    {"date": "1990-08-02", "event": "Gulf War Outbreak", "category": "Geopolitical Conflict", "description": "Iraq invades Kuwait, leading to immediate crude supply disruptions and soaring price volatility."},
+    {"date": "1997-11-27", "event": "OPEC Jakarta Expansion Mistake", "category": "OPEC Policy", "description": "OPEC raises production quotas right as the Asian Financial Crisis triggers steep demand destruction."},
+    {"date": "2001-09-11", "event": "September 11 Attacks", "category": "Geopolitical Shock", "description": "Global aviation contractions prompt immediate drops in jet fuel demand and safe-haven market premiums."},
+    {"date": "2003-03-20", "event": "Iraq War Invasion", "category": "Geopolitical Conflict", "description": "US-led military operations disrupt Middle Eastern supply logistics, creating long-term structural risk premiums."},
+    {"date": "2008-07-11", "event": "Global Financial Crisis Peak", "category": "Macroeconomic Crisis", "description": "Brent hits an all-time record high near $147/bbl before entering an aggressive demand-driven collapse."},
+    {"date": "2011-02-15", "event": "Arab Spring Outbreak & Libya Crisis", "category": "Geopolitical Conflict", "description": "Civil unrest across MENA regions blocks Libyan sweet crude output, triggering structural price spikes."},
+    {"date": "2014-11-27", "event": "OPEC Market Share Price War", "category": "OPEC Policy", "description": "OPEC maintains production volumes despite rising US shale output, shifting the market into a multi-year structural oversupply regime."},
+    {"date": "2018-11-04", "event": "US Iran Sanctions Re-imposition", "category": "Geopolitical Shock", "description": "Re-imposition of secondary energy trade sanctions curtails Iranian export volumes from international shipping routes."},
+    {"date": "2020-03-06", "event": "OPEC+ Alliance Breakdown", "category": "OPEC Policy", "description": "Saudi Arabia and Russia fail to agree on volume cuts, initiating a temporary market-share price war."},
+    {"date": "2020-03-11", "event": "COVID-19 Pandemic Declaration", "category": "Macroeconomic Shock", "description": "WHO declares global pandemic status; widespread lockdowns cause unprecedented transport fuel demand collapse."},
+    {"date": "2022-02-24", "event": "Russia-Ukraine War Outbreak", "category": "Geopolitical Conflict", "description": "Sanctions on Russian energy output prompt massive structural trade reorganizations and multi-year supply premiums."}
 ]
-
 @app.route('/api/v1/health', methods=['GET'])
 def server_health():
     """Simple system validation health-check route."""
