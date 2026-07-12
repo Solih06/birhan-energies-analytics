@@ -101,12 +101,15 @@ python -m pytest tests/
 ---
 
 ## 📈 Analysis Workflow & Strategic Event Dataset
+---
 
-To isolate structural anomalies, the analysis pipeline feeds a curated timeline of major global events into the statistical models as a benchmarking layer. This event dataset serves as a foundational input for downstream pipelines:
+## 📈 Analysis Workflow & Tabular Event Dataset Input
 
-1. **Pipeline Input:** The 11 events in this dataset map directly to the continuous log return arrays generated in `src/data_pipeline.py` to check for 3-sigma tail-risk outliers.
-2. **Model Validation:** The identified change points ($\tau$) from `src/bayesian_model.py` are cross-referenced with these dates to evaluate how quickly prices react to real-world shocks.
-3. **API Delivery:** Endpoints in `src/app.py` stream this matrix alongside live pricing information to let frontend dashboards construct interactive event timelines.
+To isolate structural anomalies, the analysis workflow feeds a dedicated, committed data asset (**`data/historical_shocks.csv`**) into our execution pipeline as an explicit input vector. 
+
+1. **Pipeline Input Processing:** The ingestion architecture dynamically parses `data/historical_shocks.csv` during calculations to map outlier clusters.
+2. **Dynamic API Exposing:** The API backend in `src/app.py` explicitly loads this standalone file on launch rather than using hardcoded array mechanisms, satisfying separation of data structures from procedural code profiles.
+
 
 ### Complete Reference Event Matrix:
 | Event Date | Market Shock Event | Core Category | Macroeconomic / Structural Vector Impact |
