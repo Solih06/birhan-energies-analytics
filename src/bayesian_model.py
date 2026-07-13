@@ -1,109 +1,117 @@
-import pymc as pm
-import pytensor.tensor as pt
+import os
+import json
+import logging
 import numpy as np
 import pandas as pd
-import os
-import logging
-import matplotlib.pyplot as plt
-from src.data_pipeline import load_and_clean_data
-import os
-os.environ["PYTENSOR_FLAGS"] = "cxx="  # Instructs PyTensor to avoid searching for missing system g++ compilers
+import pymc as pm
+import arviz as az
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def build_and_sample_change_point_model(df: pd.DataFrame, value_col: str = 'Price', samples: int = 1500):
-    """
-    Constructs a Bayesian Change Point model using PyMC to isolate an unobserved shift parameter (tau).
-    Uses a switch condition to evaluate data distribution regimes before and after the transition.
-    """
-    logging.info(f"Preparing Bayesian inference model for column: {value_col}")
+def run_bayesian_change_point():
+    logging.info("Initializing baseline data ingestion for Bayesian Engine...")
     
-    # Extract values and create a sequential time index vector
-    data_values = df[value_col].values
-    n_data_points = len(data_values)
-    time_idx = np.arange(n_data_points)
+    # Target transformed clean data structures
+    processed_data_path = os.path.join("data", "raw", "BrentOilPrices.csv") 
+    if not os.path.exists(processed_data_path):
+        logging.error(f"Source price data missing at {processed_data_path}")
+        return
+
+    # Ingest price arrays and compute continuous log returns
+    df = pd.read_csv(processed_data_path)
+    df['Date'] = pd.to_datetime(df['Date'])
+    df = df.sort_values('Date').reset_index(drop=True)
+    df['Log_Returns'] = np.log(df['Price'] / df['Price'].shift(1))
+    df = df.dropna().tail(2000) # Use a subset window to avoid local processor timeouts
     
-    # Define empirical hyper-priors based on data properties to assist MCMC convergence
-    mean_prior = data_values.mean()
-    std_prior = data_values.std()
+    y_values = df['Log_Returns'].values
+    n_records = len(y_values)
+    
+    logging.info(f"Configuring PyMC Model Architecture for {n_records} trading observations...")
     
     with pm.Model() as model:
-        # 1. Define Tau: The discrete switch point uniform prior across the time timeline
-        tau = pm.DiscreteUniform("tau", lower=0, upper=n_data_points - 1)
+        # Prior Distributions 
+        # Latent switch point (tau) uniformly bounded across the row dimensions
+        tau = pm.DiscreteUniform("tau", lower=0, upper=n_records - 1)
         
-        # 2. Define early and late regime expectations (Mu_1 and Mu_2)
-        mu_1 = pm.Normal("mu_1", mu=mean_prior, sigma=std_prior)
-        mu_2 = pm.Normal("mu_2", mu=mean_prior, sigma=std_prior)
+        # Pre-break and post-break continuous distribution parameters
+        mu_1 = pm.Normal("mu_1", mu=np.mean(y_values), sigma=0.1)
+        mu_2 = pm.Normal("mu_2", mu=np.mean(y_values), sigma=0.1)
         
-        # 3. Define observation noise prior (Sigma)
-        sigma = pm.Exponential("sigma", lam=1.0 / std_prior)
+        sigma_1 = pm.Exponential("sigma_1", lam=1.0 / np.std(y_values))
+        sigma_2 = pm.Exponential("sigma_2", lam=1.0 / np.std(y_values))
         
-        # 4. Construct the mathematical switch condition based on index vs tau position
-        # If time_idx < tau, select mu_1, else select mu_2
-        mu_assigned = pm.math.switch(tau > time_idx, mu_1, mu_2)
+        # Mathematical Selector Switch Function
+        idx = np.arange(n_records)
+        mu = pm.math.switch(tau >= idx, mu_1, mu_2)
+        sigma = pm.math.switch(tau >= idx, sigma_1, sigma_2)
         
-        # 5. Link priors to true historical observations via the likelihood profile
-        likelihood = pm.Normal("likelihood", mu=mu_assigned, sigma=sigma, observed=data_values)
+        # Integrated Likelihood Array
+        y_obs = pm.Normal("y_obs", mu=mu, sigma=sigma, observed=y_values)
         
-        # 6. Execute Markov Chain Monte Carlo sampler
-        logging.info(f"Initiating MCMC sampling sequence ({samples} draws)...")
-        trace = pm.sample(draws=samples, tune=1000, return_inferencedata=True, random_seed=42)
+        # Execution of MCMC Sampling (NUTS + Metropolis step assignment)
+        logging.info("Executing MCMC Sampling Simulations over 4 parallel chains...")
+        step1 = pm.Metropolis(vars=[tau])
+        step2 = pm.NUTS(vars=[mu_1, mu_2, sigma_1, sigma_2])
         
-    logging.info("MCMC sampling sequence completed successfully.")
-    return trace
-
-def plot_and_save_bayesian_results(trace, df: pd.DataFrame, output_image: str = "notebooks/bayesian_switch_results.png"):
-    """
-    Extracts posterior summaries and visualizes the calculated change point location probability distribution.
-    """
-    logging.info("Extracting posterior samples and compiling diagnostic visualizations...")
+        idata = pm.sample(
+            draws=4000, 
+            tune=2000, 
+            chains=4, 
+            step=[step1, step2], 
+            random_seed=42, 
+            return_inferencedata=True
+        )
+        
+    logging.info("Sampling complete. Running Convergence Diagnostics...")
     
-    # Extract calculated switch points out of the inference tracking trace
-    posterior_tau = trace.posterior["tau"].values.flatten()
+    # Compute summary parameters and Gelman-Rubin (R-hat) tracking statistics
+    summary = az.summary(idata, round_to=4)
+    r_hat_values = summary['r_hat'].values
     
-    # Calculate the most probable index point (the mode)
-    calculated_mode_idx = int(pd.Series(posterior_tau).mode()[0])
-    detected_date = df['Date'].iloc[calculated_mode_idx].strftime('%Y-%m-%d')
+    # Explicitly check for successful chain mixing and stabilization
+    if np.all(r_hat_values <= 1.05):
+        logging.info("Convergence verified successfully: All parameters show R-hat <= 1.05.")
+    else:
+        logging.warning("Convergence warnings: Certain chains exhibit high R-hat values.")
+        
+    # Extract structural posterior density intervals (95% HPDI)
+    tau_samples = idata.posterior["tau"].values.flatten()
+    tau_mean = int(np.mean(tau_samples))
     
-    plt.figure(figsize=(12, 6))
-    plt.hist(posterior_tau, bins=50, density=True, color='purple', alpha=0.6, label='Posterior Distribution of $\\tau$')
-    plt.axvline(calculated_mode_idx, color='red', linestyle='--', linewidth=2, label=f'Identified Change Point: {detected_date}')
+    hdi = az.hdi(idata, hdi_prob=0.95)
+    tau_hdi_low = int(hdi["tau"][0])
+    tau_hdi_high = int(hdi["tau"][1])
     
-    plt.title("Bayesian Change Point Detection — Posterior Probability Density of $\\tau$")
-    plt.xlabel("Timeline Trading Index Location")
-    plt.ylabel("Probability Density")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
+    change_point_date = str(df.iloc[tau_mean]['Date'].date())
+    hdi_low_date = str(df.iloc[tau_hdi_low]['Date'].date())
+    hdi_high_date = str(df.iloc[tau_hdi_high]['Date'].date())
     
-    # Ensure parent folder paths exist before writing image binary arrays
-    os.makedirs(os.path.dirname(output_image), exist_ok=True)
-    plt.savefig(output_image)
-    plt.close()
+    # Consolidate interpreted numerical outputs
+    results_payload = {
+        "tau_index": tau_mean,
+        "change_point_date": change_point_date,
+        "hpdi_95_lower_date": hdi_low_date,
+        "hpdi_95_upper_date": hdi_high_date,
+        "parameters": {
+            "mu_1_pre_break": float(summary.loc["mu_1", "mean"]),
+            "mu_2_post_break": float(summary.loc["mu_2", "mean"]),
+            "sigma_1_pre_break": float(summary.loc["sigma_1", "mean"]),
+            "sigma_2_post_break": float(summary.loc["sigma_2", "mean"])
+        },
+        "diagnostics": {
+            "tau_r_hat": float(summary.loc["tau", "r_hat"]),
+            "mu_1_r_hat": float(summary.loc["mu_1", "r_hat"]),
+            "sigma_1_r_hat": float(summary.loc["sigma_1", "r_hat"])
+        }
+    }
     
-    print(f"\n" + "="*50)
-    print(f" 🚀 BAYESIAN CHANGE POINT IDENTIFIED")
-    print("="*50)
-    print(f"Index Location   : {calculated_mode_idx}")
-    print(f"Estimated Date   : {detected_date}")
-    print(f"Result Visualization Saved To: {output_image}")
-    print("="*50 + "\n")
-    
-    return detected_date
+    # Export pre-calculated statistical arrays to a committed asset path
+    output_json_path = os.path.join("data", "bayesian_outputs.json")
+    with open(output_json_path, "w") as f:
+        json.dump(results_payload, f, indent=4)
+        
+    logging.info(f"Model outputs successfully saved to {output_json_path}")
 
 if __name__ == "__main__":
-    target_data_path = os.path.join("data", "raw", "BrentOilPrices.csv")
-    
-    if os.path.exists(target_data_path):
-        # Load and take a slice of the recent dataset for sampling performance
-        full_df = load_and_clean_data(target_data_path)
-        
-        # Slice the last 1000 records (e.g., recent decade market shifts) to prevent CPU resource limits
-        analysis_slice = full_df.tail(1000).reset_index(drop=True)
-        
-        try:
-            mcmc_trace = build_and_sample_change_point_model(analysis_slice, value_col='Price')
-            plot_and_save_bayesian_results(mcmc_trace, analysis_slice)
-        except Exception as e:
-            logging.error(f"Bayesian modeling routine hit an error: {str(e)}")
-    else:
-        print(f"Could not initialize execution. File not found at: {target_data_path}")
+    run_bayesian_change_point()
