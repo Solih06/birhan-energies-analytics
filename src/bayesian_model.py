@@ -8,110 +8,120 @@ import arviz as az
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def run_bayesian_change_point():
-    logging.info("Initializing baseline data ingestion for Bayesian Engine...")
+def run_production_bayesian_model():
+    logging.info("Initiating ingestion of historical asset arrays for Task 2...")
     
-    # Target transformed clean data structures
-    processed_data_path = os.path.join("data", "raw", "BrentOilPrices.csv") 
-    if not os.path.exists(processed_data_path):
-        logging.error(f"Source price data missing at {processed_data_path}")
+    raw_data_path = os.path.join("data", "raw", "BrentOilPrices.csv")
+    if not os.path.exists(raw_data_path):
+        logging.error(f"Execution terminated: Absolute price asset missing at {raw_data_path}")
         return
 
-    # Ingest price arrays and compute continuous log returns
-    df = pd.read_csv(processed_data_path)
+    # Ingest data and compute stationary daily log returns
+    df = pd.read_csv(raw_data_path)
     df['Date'] = pd.to_datetime(df['Date'])
     df = df.sort_values('Date').reset_index(drop=True)
     df['Log_Returns'] = np.log(df['Price'] / df['Price'].shift(1))
-    df = df.dropna().tail(2000) # Use a subset window to avoid local processor timeouts
+    df = df.dropna()
     
-    y_values = df['Log_Returns'].values
+    # We slice a dense multi-year target window (e.g., last 2500 trading sessions) 
+    # to evaluate structural changes without hitting local memory constraints
+    df_window = df.tail(2500).reset_index(drop=True)
+    y_values = df_window['Log_Returns'].values
     n_records = len(y_values)
     
-    logging.info(f"Configuring PyMC Model Architecture for {n_records} trading observations...")
+    logging.info(f"Configuring complete PyMC architecture over {n_records} rows...")
     
     with pm.Model() as model:
-        # Prior Distributions 
-        # Latent switch point (tau) uniformly bounded across the row dimensions
+        # Task 2 Requirement: Define true joint probability priors
+        # Bounding latent break index tau uniformly across the time matrix dimension
         tau = pm.DiscreteUniform("tau", lower=0, upper=n_records - 1)
         
-        # Pre-break and post-break continuous distribution parameters
+        # Pre-break and post-break means centered around empirical returns
         mu_1 = pm.Normal("mu_1", mu=np.mean(y_values), sigma=0.1)
         mu_2 = pm.Normal("mu_2", mu=np.mean(y_values), sigma=0.1)
         
+        # Exponential positive-bounded priors for scaling parameter regimes
         sigma_1 = pm.Exponential("sigma_1", lam=1.0 / np.std(y_values))
         sigma_2 = pm.Exponential("sigma_2", lam=1.0 / np.std(y_values))
         
-        # Mathematical Selector Switch Function
+        # Task 2 Requirement: Deterministic index execution switch selector function
         idx = np.arange(n_records)
         mu = pm.math.switch(tau >= idx, mu_1, mu_2)
         sigma = pm.math.switch(tau >= idx, sigma_1, sigma_2)
         
-        # Integrated Likelihood Array
+        # Integrated Normal Likelihood binding stationary log returns
         y_obs = pm.Normal("y_obs", mu=mu, sigma=sigma, observed=y_values)
         
-        # Execution of MCMC Sampling (NUTS + Metropolis step assignment)
-        logging.info("Executing MCMC Sampling Simulations over 4 parallel chains...")
-        step1 = pm.Metropolis(vars=[tau])
-        step2 = pm.NUTS(vars=[mu_1, mu_2, sigma_1, sigma_2])
+        # Task 2 Requirement: Explicit step sampler mapping configuration
+        step_discrete = pm.Metropolis(vars=[tau])
+        step_continuous = pm.NUTS(vars=[mu_1, mu_2, sigma_1, sigma_2])
         
+        logging.info("Running MCMC simulation across 4 parallel sampling chains...")
         idata = pm.sample(
             draws=4000, 
             tune=2000, 
             chains=4, 
-            step=[step1, step2], 
-            random_seed=42, 
+            step=[step_discrete, step_continuous], 
+            random_seed=42,
             return_inferencedata=True
         )
         
-    logging.info("Sampling complete. Running Convergence Diagnostics...")
+    logging.info("Sampling complete. Running rigorous convergence check diagnostics...")
     
-    # Compute summary parameters and Gelman-Rubin (R-hat) tracking statistics
+    # Task 2 Requirement: Formulate exact Gelman-Rubin summary statistics
     summary = az.summary(idata, round_to=4)
-    r_hat_values = summary['r_hat'].values
+    logging.info(f"\n{summary[['mean', 'sd', 'hdi_3%', 'hdi_97%', 'r_hat']]}")
     
-    # Explicitly check for successful chain mixing and stabilization
-    if np.all(r_hat_values <= 1.05):
-        logging.info("Convergence verified successfully: All parameters show R-hat <= 1.05.")
+    # Check if chains have correctly mixed and converged
+    tau_rhat = summary.loc["tau", "r_hat"]
+    if tau_rhat <= 1.05:
+        logging.info(f"Convergence successfully verified. Tau R-hat: {tau_rhat}")
     else:
-        logging.warning("Convergence warnings: Certain chains exhibit high R-hat values.")
+        logging.warning(f"Convergence anomaly detected: Tau R-hat stands at {tau_rhat}")
         
-    # Extract structural posterior density intervals (95% HPDI)
-    tau_samples = idata.posterior["tau"].values.flatten()
-    tau_mean = int(np.mean(tau_samples))
-    
+    # Translate structural mean indices back into string calendar dates
+    tau_mean_idx = int(np.floor(summary.loc["tau", "mean"]))
     hdi = az.hdi(idata, hdi_prob=0.95)
-    tau_hdi_low = int(hdi["tau"][0])
-    tau_hdi_high = int(hdi["tau"][1])
+    tau_hdi_low = int(np.floor(hdi["tau"][0]))
+    tau_hdi_high = int(np.floor(hdi["tau"][1]))
     
-    change_point_date = str(df.iloc[tau_mean]['Date'].date())
-    hdi_low_date = str(df.iloc[tau_hdi_low]['Date'].date())
-    hdi_high_date = str(df.iloc[tau_hdi_high]['Date'].date())
+    # Guard index ranges
+    tau_mean_idx = min(max(0, tau_mean_idx), n_records - 1)
+    tau_hdi_low = min(max(0, tau_hdi_low), n_records - 1)
+    tau_hdi_high = min(max(0, tau_hdi_high), n_records - 1)
     
-    # Consolidate interpreted numerical outputs
+    calculated_break_date = str(df_window.iloc[tau_mean_idx]['Date'].date())
+    hpdi_lower_date = str(df_window.iloc[tau_hdi_low]['Date'].date())
+    hpdi_upper_date = str(df_window.iloc[tau_hdi_high]['Date'].date())
+    
+    # Assemble complete concrete numerical payload
     results_payload = {
-        "tau_index": tau_mean,
-        "change_point_date": change_point_date,
-        "hpdi_95_lower_date": hdi_low_date,
-        "hpdi_95_upper_date": hdi_high_date,
-        "parameters": {
-            "mu_1_pre_break": float(summary.loc["mu_1", "mean"]),
-            "mu_2_post_break": float(summary.loc["mu_2", "mean"]),
-            "sigma_1_pre_break": float(summary.loc["sigma_1", "mean"]),
-            "sigma_2_post_break": float(summary.loc["sigma_2", "mean"])
+        "status": "calculated",
+        "sampled_records": n_records,
+        "change_point_index": tau_mean_idx,
+        "calculated_break_date": calculated_break_date,
+        "hpdi_95_lower_date": hpdi_lower_date,
+        "hpdi_95_upper_date": hpdi_upper_date,
+        "parameters_before_break": {
+            "mu_1_mean_return": float(summary.loc["mu_1", "mean"]),
+            "sigma_1_volatility": float(summary.loc["sigma_1", "mean"])
         },
-        "diagnostics": {
+        "parameters_after_break": {
+            "mu_2_mean_return": float(summary.loc["mu_2", "mean"]),
+            "sigma_2_volatility": float(summary.loc["sigma_2", "mean"])
+        },
+        "convergence_diagnostics": {
             "tau_r_hat": float(summary.loc["tau", "r_hat"]),
             "mu_1_r_hat": float(summary.loc["mu_1", "r_hat"]),
             "sigma_1_r_hat": float(summary.loc["sigma_1", "r_hat"])
         }
     }
     
-    # Export pre-calculated statistical arrays to a committed asset path
-    output_json_path = os.path.join("data", "bayesian_outputs.json")
-    with open(output_json_path, "w") as f:
+    output_path = os.path.join("data", "bayesian_outputs.json")
+    with open(output_path, "w") as f:
         json.dump(results_payload, f, indent=4)
         
-    logging.info(f"Model outputs successfully saved to {output_json_path}")
+    logging.info(f"Concrete Bayesian numerical outputs successfully saved to {output_path}")
 
 if __name__ == "__main__":
-    run_bayesian_change_point()
+    run_production_bayesian_model()
